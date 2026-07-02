@@ -14,9 +14,13 @@ const { generateTicketPDF } = require('./ticketService');
 
 const createTransporter = () =>
   nodemailer.createTransport({
+    // host: "smtp.gmail.com",
+    // port: 465,
+    // secure: true,
     host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASS,
