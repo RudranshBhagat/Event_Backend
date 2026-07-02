@@ -1,174 +1,270 @@
-const nodemailer = require('nodemailer');
-const QRCode = require('qrcode');
-const { generateTicketPDF } = require('./ticketService');
+const { BrevoClient } = require("@getbrevo/brevo");
+const QRCode = require("qrcode");
+const { generateTicketPDF } = require("./ticketService");
 
-// ── Transporter ───────────────────────────────────────────────────────────────
-// const createTransporter = () =>
-//   nodemailer.createTransport({
-//     service: 'gmail',
-//     auth: {
-//       user: process.env.GMAIL_USER,
-//       pass: process.env.GMAIL_APP_PASS,
-//     },
-//   });
+// -----------------------------------------------------------------------------
+// Brevo Client
+// -----------------------------------------------------------------------------
 
-const createTransporter = () =>
-  nodemailer.createTransport({
-    // host: "smtp.gmail.com",
-    // port: 465,
-    // secure: true,
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASS,
-    },
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    logger: true,
-    debug: true,
-  });
+const brevo = new BrevoClient({
+  apiKey: process.env.BREVO_API_KEY,
+});
 
-// ── HTML builder ─────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// HTML Builder
+// -----------------------------------------------------------------------------
+
 const buildMultiTicketEmailHTML = async (order, ticketIds) => {
-  // Generate inline QR data URLs for each ticket
   const qrImages = await Promise.all(
     ticketIds.map((id) =>
-      QRCode.toDataURL(id, { width: 180, margin: 2 })
+      QRCode.toDataURL(id, {
+        width: 180,
+        margin: 2,
+      })
     )
   );
 
   const ticketRows = ticketIds
     .map(
       (id, i) => `
-      <div style="border:1px solid #E5E7EB;border-radius:12px;padding:20px;margin-bottom:16px;text-align:center;background:#F9FAFB;">
-        <p style="margin:0 0 4px;font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">
-          Ticket ${i + 1} of ${ticketIds.length}
-        </p>
-        <img src="${qrImages[i]}" alt="QR Code" width="160" style="display:block;margin:12px auto;" />
-        <p style="margin:6px 0 0;font-size:11px;font-family:monospace;color:#374151;">${id}</p>
-      </div>`
-    )
-    .join('');
+<div style="border:1px solid #E5E7EB;border-radius:12px;padding:20px;margin-bottom:16px;text-align:center;background:#F9FAFB;">
+    <p style="margin:0 0 4px;font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;">
+        Ticket ${i + 1} of ${ticketIds.length}
+    </p>
 
-  const accentColor = order.ticketType === 'VIP' ? '#7C3AED' : '#2563EB';
-  const totalFormatted = `₹${(order.totalAmount || 0).toLocaleString('en-IN')}`;
+    <img
+        src="${qrImages[i]}"
+        width="160"
+        alt="QR Code"
+        style="display:block;margin:12px auto;"
+    />
+
+    <p style="margin-top:8px;font-size:11px;font-family:monospace;">
+        ${id}
+    </p>
+</div>
+`
+    )
+    .join("");
+
+  const accentColor =
+    order.ticketType === "VIP" ? "#7C3AED" : "#2563EB";
+
+  const totalFormatted = `₹${(
+    order.totalAmount || 0
+  ).toLocaleString("en-IN")}`;
 
   return `
 <!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/></head>
-<body style="margin:0;padding:0;background:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+<html>
+<head>
+<meta charset="UTF-8">
+</head>
 
-        <!-- Header -->
-        <tr><td style="background:${accentColor};padding:28px 32px;text-align:center;">
-          <h1 style="margin:0;color:#fff;font-size:24px;">🎉 You're In! &times;${ticketIds.length}</h1>
-          <p style="margin:8px 0 0;color:rgba(255,255,255,.85);font-size:14px;">${process.env.EVENT_NAME}</p>
-        </td></tr>
+<body style="background:#F3F4F6;font-family:Arial,sans-serif;padding:20px;">
 
-        <!-- Booking summary -->
-        <tr><td style="padding:24px 32px;">
-          <h2 style="margin:0 0 16px;font-size:16px;color:#111827;">Booking Summary</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px;color:#374151;">
-            <tr style="border-bottom:1px solid #F3F4F6;">
-              <td style="font-weight:600;">Name</td><td>${order.name}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #F3F4F6;">
-              <td style="font-weight:600;">Ticket Type</td><td>${order.ticketType}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #F3F4F6;">
-              <td style="font-weight:600;">Quantity</td><td>${ticketIds.length} ticket${ticketIds.length > 1 ? 's' : ''}</td>
-            </tr>
-            <tr style="border-bottom:1px solid #F3F4F6;">
-              <td style="font-weight:600;">Price Each</td><td>₹${order.pricePerTicket?.toLocaleString('en-IN')}</td>
-            </tr>
-            <tr>
-              <td style="font-weight:700;color:${accentColor};font-size:16px;">Total Paid</td>
-              <td style="font-weight:700;color:${accentColor};font-size:16px;">${totalFormatted}</td>
-            </tr>
-          </table>
-        </td></tr>
+<table width="100%" cellpadding="0" cellspacing="0">
 
-        <!-- QR Codes -->
-        <tr><td style="padding:0 32px 24px;">
-          <h2 style="margin:0 0 16px;font-size:16px;color:#111827;">
-            Your ${ticketIds.length} Ticket${ticketIds.length > 1 ? 's' : ''}
-          </h2>
-          <p style="margin:0 0 16px;font-size:13px;color:#6B7280;">
-            Each person should show their <strong>own</strong> QR at the entrance.
-            Full PDF tickets are attached to this email.
-          </p>
-          ${ticketRows}
-        </td></tr>
+<tr>
 
-        <!-- Event details -->
-        <tr><td style="background:#F9FAFB;padding:20px 32px;">
-          <p style="margin:0;font-size:13px;color:#374151;">
-            📅 <strong>Date:</strong> ${process.env.EVENT_DATE || 'TBD'}<br/>
-            📍 <strong>Venue:</strong> ${process.env.EVENT_VENUE || 'TBD'}
-          </p>
-        </td></tr>
+<td align="center">
 
-        <!-- Footer -->
-        <tr><td style="padding:20px 32px;text-align:center;font-size:12px;color:#9CA3AF;">
-          Questions? Email us at
-          <a href="mailto:${process.env.SUPPORT_EMAIL}" style="color:${accentColor};">${process.env.SUPPORT_EMAIL}</a><br/>
-          <span style="font-size:11px;">Please check spam if you don't see the attachments within 2 minutes.</span>
-        </td></tr>
+<table width="600" style="background:white;border-radius:12px;overflow:hidden;">
 
-      </table>
-    </td></tr>
-  </table>
+<tr>
+
+<td style="background:${accentColor};padding:28px;text-align:center;">
+
+<h1 style="color:white;margin:0;">
+🎉 You're In!
+</h1>
+
+<p style="color:white;">
+${process.env.EVENT_NAME}
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="padding:25px;">
+
+<h2>Booking Summary</h2>
+
+<table width="100%">
+
+<tr>
+
+<td><b>Name</b></td>
+
+<td>${order.name}</td>
+
+</tr>
+
+<tr>
+
+<td><b>Ticket Type</b></td>
+
+<td>${order.ticketType}</td>
+
+</tr>
+
+<tr>
+
+<td><b>Quantity</b></td>
+
+<td>${ticketIds.length}</td>
+
+</tr>
+
+<tr>
+
+<td><b>Price Each</b></td>
+
+<td>₹${order.pricePerTicket.toLocaleString("en-IN")}</td>
+
+</tr>
+
+<tr>
+
+<td style="color:${accentColor};"><b>Total Paid</b></td>
+
+<td style="color:${accentColor};"><b>${totalFormatted}</b></td>
+
+</tr>
+
+</table>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="padding:25px;">
+
+<h2>Your Tickets</h2>
+
+<p>
+Each attendee should present their own QR code at the entrance.
+Your PDF tickets are attached below.
+</p>
+
+${ticketRows}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="background:#F9FAFB;padding:20px;">
+
+<p>
+
+📅 <b>Date:</b> ${process.env.EVENT_DATE}
+
+<br>
+
+📍 <b>Venue:</b> ${process.env.EVENT_VENUE}
+
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="padding:20px;text-align:center;font-size:12px;color:#888;">
+
+Need help?
+
+<br>
+
+${process.env.SUPPORT_EMAIL}
+
+</td>
+
+</tr>
+
+</table>
+
+</td>
+
+</tr>
+
+</table>
+
 </body>
-</html>`;
+
+</html>
+`;
 };
 
-// ── Main send function ────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Send Email
+// -----------------------------------------------------------------------------
+
 const sendMultiTicketEmail = async (order, ticketIds) => {
   try {
-    const transporter = createTransporter();
-
-    // Build one PDF attachment per ticket
     const attachments = await Promise.all(
-      ticketIds.map(async (ticketId, i) => {
+      ticketIds.map(async (ticketId, index) => {
         const pdfBuffer = await generateTicketPDF({
           ticketId,
-          ticketNumber: i + 1,
+          ticketNumber: index + 1,
           totalInOrder: ticketIds.length,
           name: order.name,
           email: order.email,
           ticketType: order.ticketType,
           orderId: order.orderId,
         });
+
         return {
-          filename: `ticket-${i + 1}-of-${ticketIds.length}-${ticketId}.pdf`,
-          content: pdfBuffer,
-          contentType: 'application/pdf',
+          name: `ticket-${index + 1}-of-${ticketIds.length}.pdf`,
+          content: pdfBuffer.toString("base64"),
         };
       })
     );
 
-    const html = await buildMultiTicketEmailHTML(order, ticketIds);
+    const html = await buildMultiTicketEmailHTML(
+      order,
+      ticketIds
+    );
 
-    await transporter.sendMail({
-      from: `"${process.env.EVENT_NAME}" <${process.env.GMAIL_USER}>`,
-      to: order.email,
-      subject: `🎟️ Your ${ticketIds.length} Ticket${ticketIds.length > 1 ? 's' : ''} for ${process.env.EVENT_NAME}`,
-      html,
-      attachments,
+    const response = await brevo.transactionalEmails.sendTransacEmail({
+      sender: {
+        name: process.env.SENDER_NAME,
+        email: process.env.SENDER_EMAIL,
+      },
+      to: [
+        {
+          email: order.email,
+          name: order.name,
+        },
+      ],
+      subject: `🎟️ Your ${ticketIds.length} Ticket${
+        ticketIds.length > 1 ? "s" : ""
+      } for ${process.env.EVENT_NAME}`,
+      htmlContent: html,
+      attachment: attachments,
     });
 
-    console.log(`✅ Email sent to ${order.email} with ${ticketIds.length} ticket(s).`);
-  } catch (err) {
-    // Non-fatal — log and continue
-    console.error(`❌ Email send failed for ${order.email}:`, err.message);
+    console.log("✅ Email sent successfully");
+    console.log(response);
+  } catch (error) {
+    console.error("❌ Email send failed");
+
+    if (error.response && error.response.body) {
+      console.error(error.response.body);
+    } else {
+      console.error(error.message);
+    }
   }
 };
 
-module.exports = { sendMultiTicketEmail };
+module.exports = {
+  sendMultiTicketEmail,
+};
